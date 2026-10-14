@@ -106,6 +106,7 @@ public partial class InitialCreate : Migration
         migrationBuilder.InsertData(
             table: "app_users",
             columns: new[] { "Id", "PasswordHash", "Role", "UserName" },
+            columnTypes: new[] { "bigint", "nvarchar(128)", "nvarchar(20)", "nvarchar(80)" },
             values: new object[,]
             {
                 { 1L, "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9", "ADMIN", "admin" },
@@ -115,6 +116,7 @@ public partial class InitialCreate : Migration
         migrationBuilder.InsertData(
             table: "units",
             columns: new[] { "Id", "City", "Name" },
+            columnTypes: new[] { "bigint", "nvarchar(80)", "nvarchar(120)" },
             values: new object[,]
             {
                 { 1L, "Sao Paulo", "Unidade Paulista" },
@@ -125,11 +127,13 @@ public partial class InitialCreate : Migration
         migrationBuilder.InsertData(
             table: "consumption_alerts",
             columns: new[] { "Id", "AlertDate", "Message", "Status", "UnitId" },
+            columnTypes: new[] { "bigint", "datetime2", "nvarchar(300)", "nvarchar(20)", "bigint" },
             values: new object[] { 1L, new DateTime(2026, 5, 31, 12, 0, 0, DateTimeKind.Utc), "Consumo mensal acima da meta definida.", "OPEN", 1L });
 
         migrationBuilder.InsertData(
             table: "devices",
             columns: new[] { "Id", "DeviceType", "LastActivityAt", "Name", "RatedPowerW", "Status", "UnitId" },
+            columnTypes: new[] { "bigint", "nvarchar(80)", "datetime2", "nvarchar(120)", "decimal(12,2)", "nvarchar(20)", "bigint" },
             values: new object[,]
             {
                 { 1L, "HVAC", new DateTime(2026, 6, 1, 10, 0, 0, DateTimeKind.Utc), "HVAC Bloco A", 18000m, "ONLINE", 1L },
@@ -140,6 +144,7 @@ public partial class InitialCreate : Migration
         migrationBuilder.InsertData(
             table: "energy_consumptions",
             columns: new[] { "Id", "KwhConsumed", "ReferenceMonth", "UnitId" },
+            columnTypes: new[] { "bigint", "decimal(12,2)", "date", "bigint" },
             values: new object[,]
             {
                 { 1L, 14820m, new DateOnly(2026, 4, 1), 1L },
