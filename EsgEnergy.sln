@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Esg.Api", "src\Esg.Api\Esg.Api.csproj", "{1F5C948C-4893-4FC0-A6D5-A9DA7CF8BC0E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Esg.Api.Tests", "tests\Esg.Api.Tests\Esg.Api.Tests.csproj", "{D7CE985F-547E-44C9-938B-D9354FAF1182}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F5C948C-4893-4FC0-A6D5-A9DA7CF8BC0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F5C948C-4893-4FC0-A6D5-A9DA7CF8BC0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F5C948C-4893-4FC0-A6D5-A9DA7CF8BC0E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F5C948C-4893-4FC0-A6D5-A9DA7CF8BC0E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7CE985F-547E-44C9-938B-D9354FAF1182}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7CE985F-547E-44C9-938B-D9354FAF1182}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7CE985F-547E-44C9-938B-D9354FAF1182}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7CE985F-547E-44C9-938B-D9354FAF1182}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

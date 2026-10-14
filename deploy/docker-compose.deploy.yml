@@ -1,0 +1,51 @@
+# Used by GitHub Actions on ephemeral Linux runners and, optionally, on a remote Linux host.
+# Staging and production use different Compose project names and APP_PORT values.
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD as a secret}
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - esg-network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q \"SELECT 1\" -b -o /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    restart: unless-stopped
+
+  api:
+    image: "${IMAGE_NAME:?Set IMAGE_NAME}:${IMAGE_TAG:?Set IMAGE_TAG}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      Hosting__DisableHttpsRedirection: "true"
+      ConnectionStrings__DefaultConnection: "Server=db,1433;Database=EsgEnergyDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+      Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY as a secret}
+      Database__ApplyMigrationsOnStartup: "true"
+    ports:
+      - "${APP_PORT:?Set APP_PORT}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - esg-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+
+networks:
+  esg-network:
+    driver: bridge
+
+volumes:
+  sqlserver_data:

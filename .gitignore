@@ -1,0 +1,28 @@
+# .NET build output
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local runtime output
+TestResults/
+coverage/
+logs/
+tmp/
+.tools/
+*.zip
+PROMPT_PARA_CODEX.md
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,393 @@
+name: CI/CD - Cidades ESG Inteligentes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build e testes automatizados
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+
+      - name: Validar arquivos Docker Compose
+        env:
+          IMAGE_NAME: ghcr.io/example/cidades-esg-inteligentes
+          IMAGE_TAG: validation
+          APP_PORT: "8080"
+          MSSQL_SA_PASSWORD: EsgValidation2026_Strong
+          AUTH_SIGNING_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        run: |
+          docker compose --env-file .env.example config --quiet
+          docker compose -f deploy/docker-compose.deploy.yml config --quiet
+
+      - name: Restaurar dependências
+        run: dotnet restore EsgEnergy.sln
+
+      - name: Compilar solução
+        run: dotnet build EsgEnergy.sln --configuration Release --no-restore
+
+      - name: Executar testes xUnit
+        run: dotnet test EsgEnergy.sln --configuration Release --no-build --logger "trx;LogFileName=tests.trx" --results-directory TestResults
+
+      - name: Publicar relatório de testes
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish-image:
+    name: Build e publicação da imagem Docker
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image-name.outputs.image }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Definir nome da imagem em minúsculas
+        id: image-name
+        shell: bash
+        run: echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Construir e publicar imagem
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image-name.outputs.image }}:${{ github.sha }}
+            ${{ steps.image-name.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy efêmero - Staging
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.REMOTE_DEPLOY_ENABLED != 'true'
+    needs: publish-image
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_NAME: ${{ needs.publish-image.outputs.image }}
+      IMAGE_TAG: ${{ github.sha }}
+      APP_PORT: "8081"
+      COMPOSE_PROJECT_NAME: esg-staging
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Gerar configuração efêmera protegida
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSSQL_SA_PASSWORD="Esg!$(openssl rand -hex 16)"
+          AUTH_SIGNING_KEY="$(openssl rand -hex 32)"
+          echo "::add-mask::$MSSQL_SA_PASSWORD"
+          echo "::add-mask::$AUTH_SIGNING_KEY"
+          printf 'IMAGE_NAME=%s\nIMAGE_TAG=%s\nAPP_PORT=%s\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\n' \
+            "$IMAGE_NAME" "$IMAGE_TAG" "$APP_PORT" "$MSSQL_SA_PASSWORD" "$AUTH_SIGNING_KEY" > .env.deploy
+          chmod 600 .env.deploy
+
+      - name: Subir staging e validar prontidão
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml pull
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml up -d --remove-orphans --wait --wait-timeout 300
+          HEALTH_RESPONSE="$(curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "http://127.0.0.1:${APP_PORT}/health")"
+          printf 'Resposta do staging: %s\n' "$HEALTH_RESPONSE"
+          {
+            echo '## Staging aprovado'
+            echo
+            echo "- Imagem: \`${IMAGE_NAME}:${IMAGE_TAG}\`"
+            echo "- Compose project: \`${COMPOSE_PROJECT_NAME}\`"
+            echo "- Health check: \`HTTP 200 - ${HEALTH_RESPONSE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coletar evidências do staging
+        if: always()
+        shell: bash
+        run: |
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml ps --all > staging-compose-ps.txt 2>&1 || true
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml logs --no-color > staging-compose-logs.txt 2>&1 || true
+
+      - name: Publicar evidências do staging
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: staging-runtime-evidence-${{ github.sha }}
+          path: |
+            staging-compose-ps.txt
+            staging-compose-logs.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Encerrar staging efêmero
+        if: always()
+        run: docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml down --volumes --remove-orphans
+
+  deploy-production:
+    name: Deploy efêmero - Produção
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.REMOTE_DEPLOY_ENABLED != 'true'
+    needs: [publish-image, deploy-staging]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_NAME: ${{ needs.publish-image.outputs.image }}
+      IMAGE_TAG: ${{ github.sha }}
+      APP_PORT: "8080"
+      COMPOSE_PROJECT_NAME: esg-production
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Gerar configuração efêmera protegida
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSSQL_SA_PASSWORD="Esg!$(openssl rand -hex 16)"
+          AUTH_SIGNING_KEY="$(openssl rand -hex 32)"
+          echo "::add-mask::$MSSQL_SA_PASSWORD"
+          echo "::add-mask::$AUTH_SIGNING_KEY"
+          printf 'IMAGE_NAME=%s\nIMAGE_TAG=%s\nAPP_PORT=%s\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\n' \
+            "$IMAGE_NAME" "$IMAGE_TAG" "$APP_PORT" "$MSSQL_SA_PASSWORD" "$AUTH_SIGNING_KEY" > .env.deploy
+          chmod 600 .env.deploy
+
+      - name: Subir produção e validar prontidão
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml pull
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml up -d --remove-orphans --wait --wait-timeout 300
+          HEALTH_RESPONSE="$(curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "http://127.0.0.1:${APP_PORT}/health")"
+          printf 'Resposta da produção: %s\n' "$HEALTH_RESPONSE"
+          {
+            echo '## Produção aprovada'
+            echo
+            echo "- Imagem: \`${IMAGE_NAME}:${IMAGE_TAG}\`"
+            echo "- Compose project: \`${COMPOSE_PROJECT_NAME}\`"
+            echo "- Health check: \`HTTP 200 - ${HEALTH_RESPONSE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coletar evidências da produção
+        if: always()
+        shell: bash
+        run: |
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml ps --all > production-compose-ps.txt 2>&1 || true
+          docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml logs --no-color > production-compose-logs.txt 2>&1 || true
+
+      - name: Publicar evidências da produção
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-runtime-evidence-${{ github.sha }}
+          path: |
+            production-compose-ps.txt
+            production-compose-logs.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Encerrar produção efêmera
+        if: always()
+        run: docker compose --env-file .env.deploy -f deploy/docker-compose.deploy.yml down --volumes --remove-orphans
+
+  deploy-staging-remote:
+    name: Deploy remoto opcional - Staging
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.REMOTE_DEPLOY_ENABLED == 'true'
+    needs: publish-image
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      SSH_HOST: ${{ vars.SSH_HOST }}
+      SSH_USER: ${{ vars.SSH_USER }}
+      SSH_PORT: ${{ vars.SSH_PORT }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      APP_PORT: ${{ vars.APP_PORT }}
+      IMAGE_NAME: ${{ needs.publish-image.outputs.image }}
+      IMAGE_TAG: ${{ github.sha }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD }}
+      AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Validar configuração do ambiente
+        shell: bash
+        run: |
+          set -euo pipefail
+          for var in SSH_HOST SSH_USER SSH_PORT DEPLOY_PATH APP_PORT SSH_PRIVATE_KEY SSH_KNOWN_HOSTS MSSQL_SA_PASSWORD AUTH_SIGNING_KEY GHCR_USERNAME GHCR_READ_TOKEN; do
+            if [[ -z "${!var:-}" ]]; then echo "Configuração ausente: $var (ver Environment staging)." >&2; exit 1; fi
+          done
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { echo "DEPLOY_PATH deve ser caminho absoluto sem espaços." >&2; exit 1; }
+          [[ "$APP_PORT" =~ ^[0-9]{2,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "APP_PORT inválida." >&2; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( SSH_PORT >= 1 && SSH_PORT <= 65535 )) || { echo "SSH_PORT inválida." >&2; exit 1; }
+          [[ "$MSSQL_SA_PASSWORD" =~ ^[A-Za-z0-9_!@%+=.-]{8,128}$ ]] || { echo "MSSQL_SA_PASSWORD deve usar 8-128 caracteres sem espaços/$/#/aspas." >&2; exit 1; }
+          [[ "$AUTH_SIGNING_KEY" =~ ^[A-Fa-f0-9]{64,}$ ]] || { echo "AUTH_SIGNING_KEY deve conter pelo menos 64 caracteres hexadecimais (gere com openssl rand -hex 32)." >&2; exit 1; }
+
+      - name: Preparar arquivos e publicar no servidor de staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
+
+          printf 'IMAGE_NAME=%s\nIMAGE_TAG=%s\nAPP_PORT=%s\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\n' \
+            "$IMAGE_NAME" "$IMAGE_TAG" "$APP_PORT" "$MSSQL_SA_PASSWORD" "$AUTH_SIGNING_KEY" > .env.deploy
+          printf 'GHCR_USERNAME=%s\nGHCR_READ_TOKEN=%s\n' "$GHCR_USERNAME" "$GHCR_READ_TOKEN" > .registry.env
+          chmod 600 .env.deploy .registry.env
+
+          scp -i "$HOME/.ssh/id_ed25519" -P "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" deploy/docker-compose.deploy.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.yml"
+          scp -i "$HOME/.ssh/id_ed25519" -P "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" .env.deploy .registry.env "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$SSH_USER@$SSH_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' APP_PORT='$APP_PORT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          trap 'rm -f .registry.env; docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          chmod 600 .env.deploy .registry.env
+          set -a
+          . ./.registry.env
+          set +a
+          printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          rm -f .registry.env
+          docker compose -p esg-staging --env-file .env.deploy -f docker-compose.yml pull
+          docker compose -p esg-staging --env-file .env.deploy -f docker-compose.yml up -d --remove-orphans --wait --wait-timeout 180
+          echo "Staging healthy at http://127.0.0.1:${APP_PORT}/health"
+          REMOTE
+
+          rm -f .env.deploy .registry.env
+
+  deploy-production-remote:
+    name: Deploy remoto opcional - Produção
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.REMOTE_DEPLOY_ENABLED == 'true'
+    needs: [publish-image, deploy-staging-remote]
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SSH_HOST: ${{ vars.SSH_HOST }}
+      SSH_USER: ${{ vars.SSH_USER }}
+      SSH_PORT: ${{ vars.SSH_PORT }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      APP_PORT: ${{ vars.APP_PORT }}
+      IMAGE_NAME: ${{ needs.publish-image.outputs.image }}
+      IMAGE_TAG: ${{ github.sha }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_SA_PASSWORD }}
+      AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Validar configuração do ambiente
+        shell: bash
+        run: |
+          set -euo pipefail
+          for var in SSH_HOST SSH_USER SSH_PORT DEPLOY_PATH APP_PORT SSH_PRIVATE_KEY SSH_KNOWN_HOSTS MSSQL_SA_PASSWORD AUTH_SIGNING_KEY GHCR_USERNAME GHCR_READ_TOKEN; do
+            if [[ -z "${!var:-}" ]]; then echo "Configuração ausente: $var (ver Environment production)." >&2; exit 1; fi
+          done
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { echo "DEPLOY_PATH deve ser caminho absoluto sem espaços." >&2; exit 1; }
+          [[ "$APP_PORT" =~ ^[0-9]{2,5}$ ]] && (( APP_PORT >= 1 && APP_PORT <= 65535 )) || { echo "APP_PORT inválida." >&2; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( SSH_PORT >= 1 && SSH_PORT <= 65535 )) || { echo "SSH_PORT inválida." >&2; exit 1; }
+          [[ "$MSSQL_SA_PASSWORD" =~ ^[A-Za-z0-9_!@%+=.-]{8,128}$ ]] || { echo "MSSQL_SA_PASSWORD deve usar 8-128 caracteres sem espaços/$/#/aspas." >&2; exit 1; }
+          [[ "$AUTH_SIGNING_KEY" =~ ^[A-Fa-f0-9]{64,}$ ]] || { echo "AUTH_SIGNING_KEY deve conter pelo menos 64 caracteres hexadecimais (gere com openssl rand -hex 32)." >&2; exit 1; }
+
+      - name: Preparar arquivos e publicar no servidor de produção
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
+
+          printf 'IMAGE_NAME=%s\nIMAGE_TAG=%s\nAPP_PORT=%s\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\n' \
+            "$IMAGE_NAME" "$IMAGE_TAG" "$APP_PORT" "$MSSQL_SA_PASSWORD" "$AUTH_SIGNING_KEY" > .env.deploy
+          printf 'GHCR_USERNAME=%s\nGHCR_READ_TOKEN=%s\n' "$GHCR_USERNAME" "$GHCR_READ_TOKEN" > .registry.env
+          chmod 600 .env.deploy .registry.env
+
+          scp -i "$HOME/.ssh/id_ed25519" -P "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" deploy/docker-compose.deploy.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.yml"
+          scp -i "$HOME/.ssh/id_ed25519" -P "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" .env.deploy .registry.env "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$SSH_USER@$SSH_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' APP_PORT='$APP_PORT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          trap 'rm -f .registry.env; docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          chmod 600 .env.deploy .registry.env
+          set -a
+          . ./.registry.env
+          set +a
+          printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          rm -f .registry.env
+          docker compose -p esg-production --env-file .env.deploy -f docker-compose.yml pull
+          docker compose -p esg-production --env-file .env.deploy -f docker-compose.yml up -d --remove-orphans --wait --wait-timeout 180
+          echo "Production healthy at http://127.0.0.1:${APP_PORT}/health"
+          REMOTE
+
+          rm -f .env.deploy .registry.env
