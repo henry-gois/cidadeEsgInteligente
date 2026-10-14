@@ -30,7 +30,7 @@ A API REST oferece funcionalidades para consumo de energia, indicadores e dashbo
 ├── EsgEnergy.sln
 └── docs/
     ├── documentacao-tecnica.pdf
-    └── evidencias/              # Prints reais a adicionar após execução
+    └── evidencias/              # Prints reais da execução aprovada
 ```
 
 ## Como executar localmente com Docker
@@ -97,7 +97,7 @@ dotnet test EsgEnergy.sln --configuration Release
 
 O projeto de testes original usa xUnit e stubs para validar respostas HTTP 200 dos controllers. Os testes são de unidade e não substituem testes de integração com SQL Server.
 
-**Validação local realizada em 13/10/2026:** restore concluído, build Release com 0 erros e 0 avisos e 5 de 5 testes xUnit aprovados com o SDK .NET 8.0.426. A execução no GitHub Actions continua necessária para produzir a evidência do pipeline.
+**Validação realizada em 13/10/2026:** localmente, restore concluído, build Release com 0 erros e 0 avisos e 5 de 5 testes xUnit aprovados com o SDK .NET 8.0.426. A [execução real no GitHub Actions](https://github.com/henry-gois/cidadeEsgInteligente/actions/runs/38491269652) também foi aprovada.
 
 Para uma validação estática do Compose sem criar `.env` nem iniciar containers:
 
@@ -204,14 +204,25 @@ docker pull ghcr.io/OWNER/REPO:TAG
 
 ## Prints do funcionamento
 
-Ainda não há prints de execução real no pacote inicial, porque a API não foi executada neste ambiente e não há credenciais/servidores associados ao aluno. Para concluir esta seção, capture evidências reais após executar o pipeline e o deploy. Guarde os arquivos em `docs/evidencias/` e use-os aqui:
+A execução `#2`, do commit `608c0ff98b957e5cabcfc00107c6951bb8c40537`, terminou com **Success** em 3m42s. Foram aprovados build e 5/5 testes, publicação da imagem Docker, staging e produção. Os dois deployments subiram API + SQL Server em runners Linux independentes e concluíram a etapa de prontidão com `HTTP 200 - {"status":"healthy"}`. Os artefatos `test-results`, `staging-runtime-evidence-*` e `production-runtime-evidence-*` permanecem anexados à execução.
 
-- `pipeline-build-test.png`: execução do GitHub Actions mostrando build e testes aprovados.
-- `ghcr-image.png`: pacote/imagem com a tag do commit publicada no GHCR.
-- `staging-health.png`: ambiente staging respondendo HTTP 200 em `/health`.
-- `production-health.png`: ambiente produção respondendo HTTP 200 em `/health`.
+[Abrir execução aprovada no GitHub Actions](https://github.com/henry-gois/cidadeEsgInteligente/actions/runs/38491269652) · [Abrir imagem pública no GHCR](https://github.com/henry-gois/cidadeEsgInteligente/pkgs/container/cidadeesginteligente)
 
-Não substitua essas evidências por telas simuladas. Instruções detalhadas estão em [`docs/evidencias/README.md`](docs/evidencias/README.md).
+### Pipeline completo
+
+![Pipeline do GitHub Actions aprovado](docs/evidencias/pipeline-sucesso.png)
+
+### Imagem publicada no GHCR
+
+![Imagem pública no GHCR com tags latest e SHA](docs/evidencias/ghcr-imagem-publicada.png)
+
+### Staging
+
+![Deploy de staging e validação de prontidão aprovados](docs/evidencias/staging-health.png)
+
+### Produção
+
+![Deploy de produção e validação de prontidão aprovados](docs/evidencias/producao-health.png)
 
 ## Tecnologias utilizadas
 
@@ -227,20 +238,20 @@ Não substitua essas evidências por telas simuladas. Instruções detalhadas es
 
 ## Checklist de entrega
 
-O status distingue **arquivos preparados** de **execução comprovada**. Atualize o checklist depois de validar o ambiente e coletar os prints.
+Checklist preenchido após a validação local e a execução real do pipeline no GitHub Actions.
 
 | Item | Status atual |
 |---|---|
-| Projeto compactado em ZIP com estrutura organizada | [x] Arquivo gerado para revisão/entrega |
-| Dockerfile funcional | [ ] Arquivo criado; build real ainda precisa ser validado |
-| `docker-compose.yml` / orquestração | [ ] Arquivo criado; executar `docker compose config` e subir |
-| Pipeline com build, testes e deploy | [ ] Workflow configurado; precisa ser executado no GitHub |
-| README com instruções e espaço para evidências | [x] Instruções incluídas; prints reais pendentes |
-| Documentação técnica PDF | [x] PDF incluído; prints reais pendentes |
+| Projeto compactado em ZIP com estrutura organizada | [x] ZIP final gerado após as evidências |
+| Dockerfile funcional | [x] Imagem construída pelo GitHub Actions e publicada no GHCR |
+| `docker-compose.yml` / orquestração | [x] API + SQL Server executados em staging e produção |
+| Pipeline com build, testes e deploy | [x] Execução `#2` concluída com Success |
+| README com instruções e prints | [x] Instruções, links e quatro capturas reais incluídos |
+| Documentação técnica PDF | [x] PDF atualizado com integrantes, resultados e evidências |
 | Restore, build Release e testes locais | [x] Executados: 0 erros, 0 avisos e 5/5 testes aprovados |
-| Testes aprovados no pipeline | [ ] A comprovar no GitHub Actions |
-| Deploy realizado em staging | [ ] A comprovar no job efêmero do GitHub Actions |
-| Deploy realizado em produção | [ ] A comprovar após sucesso de staging |
-| Prints reais de pipeline, staging e produção anexados | [ ] Pendentes após execução |
+| Testes aprovados no pipeline | [x] 5/5 testes; arquivo TRX publicado como artefato |
+| Deploy realizado em staging | [x] Job aprovado; `/health` HTTP 200 |
+| Deploy realizado em produção | [x] Job aprovado após staging; `/health` HTTP 200 |
+| Prints reais de pipeline, GHCR, staging e produção anexados | [x] Arquivos em `docs/evidencias/` |
 
-**Antes de enviar ao professor:** confirme que os jobs estão verdes, abra os dois ambientes, adicione os prints reais e gere novamente o ZIP final. Se o professor exigir deploy público, inclua URLs acessíveis e não exponha portas/credenciais desnecessariamente.
+**Observação:** staging e produção são deployments reais, porém efêmeros, executados em runners isolados do GitHub Actions. Eles são encerrados ao fim de cada job; a comprovação permanece no histórico, nos artefatos e nas capturas. O modo SSH persistente está pronto caso seja exigida hospedagem contínua.

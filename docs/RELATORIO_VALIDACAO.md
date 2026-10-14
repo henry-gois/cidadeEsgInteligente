@@ -7,15 +7,16 @@ Data da auditoria: 13 de outubro de 2026.
 | Verificação | Resultado |
 |---|---|
 | Inventário de código, migrations, testes, Docker, CI/CD e documentação | Concluído |
-| Sintaxe de `.github/workflows/ci-cd.yml` | Aprovada por parser YAML; execução no GitHub pendente |
-| Sintaxe de `docker-compose.yml` e `deploy/docker-compose.deploy.yml` | Aprovada por parser YAML; normalização com Docker pendente |
+| Sintaxe e execução de `.github/workflows/ci-cd.yml` | Aprovadas; execução `#2` terminou com Success em 3m42s |
+| `docker-compose.yml` e `deploy/docker-compose.deploy.yml` | Validados e usados para subir API + SQL Server nos jobs Linux |
 | PDF técnico | 6 páginas extraídas e renderizadas sem corte, sobreposição ou glifos quebrados |
 | Varredura de chaves privadas, tokens GitHub/AWS e arquivos `.env` | Nenhum segredo real ou `.env` encontrado |
 | `dotnet restore/build/test` | Aprovado com SDK .NET 8.0.426: restore concluído, build Release com 0 erros/0 avisos e 5/5 testes xUnit aprovados |
-| `docker compose config`, build da imagem e `/health` | Não executado: Docker não está instalado no ambiente de auditoria |
-| GitHub Actions, GHCR e deploy | Repositório público informado; execução ainda pendente do primeiro push. O modo padrão usa staging/produção efêmeros sem servidor próprio |
+| Build da imagem e publicação | Aprovados no GitHub Actions; imagem pública no GHCR com tags `latest` e `608c0ff...` |
+| Staging | Aprovado em 55s; API + SQL Server e `/health` HTTP 200 |
+| Produção | Aprovada em 58s depois de staging; API + SQL Server e `/health` HTTP 200 |
 
-Os itens marcados como pendentes não devem ser apresentados como aprovados. A validação .NET abaixo já foi executada localmente; repita-a no GitHub Actions e execute as etapas Docker antes da entrega. Anexe somente capturas reais.
+Validação comprovada em <https://github.com/henry-gois/cidadeEsgInteligente/actions/runs/38491269652>. A imagem está em <https://github.com/henry-gois/cidadeEsgInteligente/pkgs/container/cidadeesginteligente>. Os deployments padrão são reais e efêmeros: permanecem ativos durante cada job e são removidos ao final.
 
 ## Comandos para repetir a validação
 
@@ -38,12 +39,14 @@ O último comando preserva o volume. Não use `docker compose down -v` sem inten
 - O job de CI passou a validar tanto o Compose local quanto o de deploy antes de restaurar/compilar a solução.
 - SSH e SCP passaram a exigir explicitamente a host key registrada em `SSH_KNOWN_HOSTS`.
 - O deploy remoto passou a remover o login temporário do GHCR também quando `pull` ou `up` falhar.
+- O pipeline ganhou deployments efêmeros padrão para staging e produção, eliminando a necessidade de servidor próprio para a demonstração.
+- A migration inicial recebeu os tipos SQL explícitos nos `InsertData`; isso corrigiu a falha encontrada no primeiro deploy com SQL Server real.
 
-## Evidências externas ainda necessárias
+## Evidências anexadas
 
-1. GitHub Actions com restore, build e testes aprovados e o artefato TRX disponível.
-2. GHCR mostrando a imagem com a tag imutável igual ao SHA do commit.
-3. Staging respondendo HTTP 200 em `/health`.
-4. Produção respondendo HTTP 200 em `/health` depois do sucesso de staging.
+1. GitHub Actions com restore, build e 5/5 testes aprovados e artefato TRX disponível.
+2. GHCR mostrando a imagem com tag imutável igual ao SHA do commit e tag `latest`.
+3. Staging aprovado com a etapa de prontidão e `/health` HTTP 200.
+4. Produção aprovada depois de staging, com `/health` HTTP 200.
 
-Os nomes e o local sugeridos para as capturas estão em `docs/evidencias/README.md`.
+As capturas originais e seus detalhes estão em `docs/evidencias/`.

@@ -1,11 +1,14 @@
-# Evidências reais a coletar
+# Evidências reais coletadas
 
-Adicione neste diretório capturas de tela originais após executar o trabalho. Não inclua senhas, tokens, chaves privadas ou dados pessoais.
+Capturas originais da execução `#2` do GitHub Actions, commit `608c0ff98b957e5cabcfc00107c6951bb8c40537`, realizada em 13/10/2026. Nenhuma captura contém senhas, tokens ou chaves privadas.
 
-1. `pipeline-build-test.png` — GitHub Actions com restore, build e testes aprovados.
-2. `ghcr-image.png` — pacote GHCR com a tag SHA do commit.
-3. `staging-health.png` — navegador/Postman/curl mostrando HTTP 200 em `http://HOST_STAGING:PORTA/health`.
-4. `production-health.png` — navegador/Postman/curl mostrando HTTP 200 em `http://HOST_PRODUCTION:PORTA/health`.
-5. Opcional: `compose-ps.png` — `docker compose ps` com serviços healthy.
+1. `pipeline-sucesso.png` — fluxo completo aprovado: build/testes, imagem Docker, staging e produção.
+2. `ghcr-imagem-publicada.png` — pacote público GHCR com as tags `latest` e SHA imutável.
+3. `staging-health.png` — job de staging aprovado, incluindo a etapa "Subir staging e validar prontidão".
+4. `producao-health.png` — job de produção aprovado, incluindo a etapa "Subir produção e validar prontidão".
 
-Inclua no README/PDF somente os prints que realmente foram obtidos. Se as evidências ficarem em outra pasta ou tiverem nomes diferentes, atualize os caminhos na documentação.
+Execução: <https://github.com/henry-gois/cidadeEsgInteligente/actions/runs/38491269652>
+
+Imagem: <https://github.com/henry-gois/cidadeEsgInteligente/pkgs/container/cidadeesginteligente>
+
+Os health checks usam `curl --fail` contra `/health`; os jobs só ficam verdes quando a API responde e o banco SQL Server está acessível. O resumo de cada job registrou `HTTP 200 - {"status":"healthy"}`.
